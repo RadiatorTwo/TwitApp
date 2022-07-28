@@ -25,7 +25,7 @@ namespace TwitApp.Services
         Task BlockUserAndFollower();
         Task BlockUsername(string usernameToBlock);
         Task UnblockUserAndFollower(string usernameToUnblock);
-        Task BlockRecursive(int depth);
+        Task BlockRecursive(string username, int maxDepth);
 
         Task<string> GetUsername(long id);
 
@@ -98,7 +98,7 @@ namespace TwitApp.Services
                 await _twitContext.SaveChangesAsync();
                 Console.WriteLine("Count: {0}", count);
 
-                System.Threading.Thread.Sleep(500);
+                await Task.Delay(500);
             }
         }
 
@@ -264,7 +264,7 @@ namespace TwitApp.Services
                         Console.WriteLine(ex.Message);
                     }
                     await AddBlockedId(followerId);
-                    System.Threading.Thread.Sleep(100);
+                    await Task.Delay(100);
                 }
             }
 
@@ -343,112 +343,100 @@ namespace TwitApp.Services
                     }
 
                     await RemoveBlockedId(followerId);
-                    System.Threading.Thread.Sleep(100);
+                    await Task.Delay(100);
                 }
             }
 
             Console.WriteLine("Benutzer {0} und Follower entblockt.", userToUnblock.Name);
         }
 
-        public async Task BlockRecursive(string username, int depth)
+        public async Task BlockRecursive(string username, int maxDepth)
         {
-            Tweetinvi.Models.IUser userToBlock;
+            Tweetinvi.Models.IUser user = null;
 
             try
             {
-                userToBlock = await _twitterClient.Users.GetUserAsync(username);
+                Console.WriteLine("Lade User zum Blocken");
+                user = await _twitterClient.Users.GetUserAsync(username);
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine(ex.Message);
-                return;
             }
-        }
 
-        private async Task BlockUsersRecursive(string username, int currentDepth, int maxDepth)
-        {
-            Tweetinvi.Models.IUser userToBlock;
-
-            try
+            if (user == null)
             {
-                userToBlock = await _twitterClient.Users.GetUserAsync(username);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
                 return;
             }
 
-            AnsiConsole.MarkupLine("Blocke: {0}, {1}", userToBlock.Name, userToBlock.ScreenName);
+            Console.WriteLine("Blocke: {0}, {1}", user.Name, user.ScreenName);
+            await _twitterClient.Users.BlockUserAsync(user.Id);
 
-            var followerToBlock = userToBlock.GetFollowerIds();
+            Console.WriteLine("Lade Follower IDs");
+            var ids = await GetFollowerIdsRecursive(user.Id, 0, maxDepth);
+            Console.WriteLine("Anzahl geladener IDs: {0}", ids.Count);
+            Console.WriteLine("Starte Block");
+
+            await Task.Delay(1000);
 
             var queryRateLimit = await _twitterClient.RateLimits.GetRateLimitsAsync();
 
-            while (!followerToBlock.Completed)
+            foreach (var id in ids)
             {
-                ITwitterIteratorPage<long, string> followerPage;
-                try
+                if (queryRateLimit.BlocksIdsLimit.Remaining == 0)
                 {
-                    if (queryRateLimit.FollowersIdsLimit.Remaining == 0)
-                    {
-                        Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", queryRateLimit.FollowersIdsLimit.ResetDateTime);
-                        //var currentTime = DateTime.Now;
-                        //while (currentTime <= queryRateLimit.FollowersIdsLimit.ResetDateTime)
-                        //{
-                        //    System.Threading.Thread.Sleep(30000);
-                        //    currentTime = DateTime.Now;
-                        //}
-                    }
-
-                    followerPage = await followerToBlock.NextPageAsync();
-                }
-                catch
-                {
-                    return;
+                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", queryRateLimit.BlocksIdsLimit.ResetDateTime);
                 }
 
-                foreach (var followerId in followerPage)
+                await _twitterClient.Users.BlockUserAsync(id);
+            }
+        }
+
+        private async Task<List<long>> GetFollowerIdsRecursive(long id, int currentDepth, int maxDepth)
+        {
+            var result = new List<long>();
+            if (currentDepth > maxDepth)
+            {
+                return result;
+            }
+
+            Tweetinvi.Models.IUser user = null;
+
+            try
+            {
+                user = await _twitterClient.Users.GetUserAsync(id);
+            }
+            catch
+            {
+            }
+
+            if (user == null)
+            {
+                return result;
+            }
+
+            var queryRateLimit = await _twitterClient.RateLimits.GetRateLimitsAsync();
+
+            var iterator = user.GetFollowerIds();
+
+            while (!iterator.Completed)
+            {
+                Console.WriteLine("Follower ID Remaining Rate Limit: {0}", queryRateLimit.FollowersIdsLimit.Remaining);
+                if (queryRateLimit.FollowersIdsLimit.Remaining == 0)
                 {
-                    if (await CheckBlockedId(followerId))
-                    {
-                        Console.WriteLine("Bereits geblockt: {0}", followerId);
-                        continue;
-                    }
+                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", queryRateLimit.FollowersIdsLimit.ResetDateTime);
+                }
 
-                    if (await CheckFollowerId(followerId))
-                    {
-                        Console.WriteLine("Follower Skip: {0}", followerId.ToString());
-                        continue;
-                    }
+                var page = await iterator.NextPageAsync();
 
-                    if (await CheckFollowingId(followerId))
-                    {
-                        Console.WriteLine("Friend Skip: {0}", followerId.ToString());
-                        continue;
-                    }
+                foreach (var followerId in page)
+                {
+                    result.Add(followerId);
 
-                    try
-                    {
-                        await _twitterClient.Users.BlockUserAsync(followerId);
-                        Console.WriteLine("Block durchgeführt: {0}", followerId.ToString());
-                    }
-                    catch (TwitterException ex)
-                    {
-                        Console.WriteLine(ex.Message);
-                    }
-                    await AddBlockedId(followerId);
-                    System.Threading.Thread.Sleep(100);
+                    result.AddRange(await GetFollowerIdsRecursive(followerId, currentDepth + 1, maxDepth));
                 }
             }
 
-            if (!await CheckBlockedId(userToBlock.Id))
-            {
-                await _twitterClient.Users.BlockUserAsync(userToBlock);
-                await AddBlockedId(userToBlock.Id);
-            }
-
-            Console.WriteLine("Benutzer {0} und Follower geblockt.", userToBlock.Name);
+            return result;
         }
 
         private async Task<bool> CheckBlockedId(long id)
@@ -528,11 +516,6 @@ namespace TwitApp.Services
         public async Task<int> GetDbFriendCount()
         {
             return await _twitContext.Friends.CountAsync();
-        }
-
-        public Task BlockRecursive(int depth)
-        {
-            throw new NotImplementedException();
         }
     }
 }

@@ -89,7 +89,9 @@ namespace TwitApp.HostedServices
                     break;
 
                 case MenuItems.MainMenu.MenuType.BlockRecursive:
-                    //StartBlockUsersRecursive();
+                    var usernameToBlockRecursive = AnsiConsole.Ask<string>("[green]Benutzernamen[/] eingeben:");
+                    var depth = AnsiConsole.Ask<int>("[green]Rekursions Tiefe[/] eingeben:");
+                    await _twitService.BlockRecursive(usernameToBlockRecursive, depth);
                     break;
 
                 case MenuItems.MainMenu.MenuType.LoadUsername:
