@@ -16,8 +16,8 @@ namespace TwitApp.Data
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "Twit.db");
-            
+            var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "Database", "Twit.db");
+
             if (!Directory.Exists(Path.GetDirectoryName(dbPath)))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(dbPath));

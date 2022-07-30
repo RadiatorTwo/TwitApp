@@ -3,6 +3,7 @@ using Spectre.Console;
 using TwitApp.Data;
 using TwitApp.Models;
 using CoreTweet;
+using static TwitApp.Extensions.HelperExtensions;
 
 namespace TwitApp.Services
 {
@@ -22,6 +23,8 @@ namespace TwitApp.Services
         Task<int> GetDbBlockedCount();
         Task<int> GetDbFollowerCount();
         Task<int> GetDbFriendCount();
+
+        Task<RateLimit> GetBlocksRateLimit();
     }
 
     public class TwitService : ITwitService
@@ -49,11 +52,52 @@ namespace TwitApp.Services
             return Task.CompletedTask;
         }
 
+        private async Task CheckRateLimit(RateLimit rateLimit)
+        {
+            if (rateLimit.Remaining == 0)
+            {
+                AnsiConsole.MarkupLine("Rate Limit erreicht. Fortsetzung: {0}", rateLimit.Reset.LocalDateTime);
+
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.BouncingBar)
+                    .StartAsync("Verbleibend: ", async ctx =>
+                    {
+                        while (DateTime.Now < rateLimit.Reset)
+                        {
+                            var span = rateLimit.Reset.LocalDateTime - DateTime.Now;
+                            string formatted = string.Format("{0}{1}{2}{3}", span.Duration().Days > 0 ? string.Format("{0:0} Tag{1}, ", span.Days, span.Days == 1 ? string.Empty : "e") : string.Empty,
+                                                                             span.Duration().Hours > 0 ? string.Format("{0:0} Stunden, ", span.Hours) : string.Empty,
+                                                                             span.Duration().Minutes > 0 ? string.Format("{0:0} Minuten, ", span.Minutes) : string.Empty,
+                                                                             span.Duration().Seconds > 0 ? string.Format("{0:0} Sekunden", span.Seconds) : string.Empty);
+
+                            if (formatted.EndsWith(", ")) formatted = formatted.Substring(0, formatted.Length - 2);
+
+                            if (string.IsNullOrEmpty(formatted)) formatted = "0 seconds";
+
+                            ctx.Status = String.Format("Verbleibend: {0}", formatted);
+                            await Task.Delay(1000);
+                        }
+                    });
+            }
+        }
+
         public async Task LoadBlockedUsers()
         {
+            var rateLimit = await GetBlocksRateLimit();
+
+            await CheckRateLimit(rateLimit);
+
             await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM BlockedUsers;");
 
-            var iterator = await _twitterClient.Blocks.IdsAsync();
+            Cursored<long> iterator = null;
+
+            try
+            {
+                iterator = await _twitterClient.Blocks.IdsAsync();
+            }
+            catch
+            {
+            }
 
             long i = 0;
             long count = 0;
@@ -61,12 +105,9 @@ namespace TwitApp.Services
             do
             {
                 i++;
-                AnsiConsole.MarkupLine("Page " + i.ToString());
+                await CheckRateLimit(iterator.RateLimit);
 
-                if (iterator.RateLimit.Remaining == 0)
-                {
-                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", iterator.RateLimit.Reset);
-                }
+                AnsiConsole.MarkupLine("Page " + i.ToString());
 
                 foreach (var blockedId in iterator.Result)
                 {
@@ -83,7 +124,7 @@ namespace TwitApp.Services
                     iterator = await _twitterClient.Blocks.IdsAsync(iterator.NextCursor);
                 }
 
-                Console.WriteLine("Count: {0}", count);
+                AnsiConsole.MarkupLine("Count: {0}", count);
                 await Task.Delay(100);
             } while (iterator.NextCursor != 0);
         }
@@ -466,6 +507,14 @@ namespace TwitApp.Services
         public async Task<int> GetDbFriendCount()
         {
             return await _twitContext.Friends.CountAsync();
+        }
+
+        public async Task<RateLimit> GetBlocksRateLimit()
+        {
+            var rateLimits = await _twitterClient.Application.RateLimitStatusAsync(@"blocks");
+            var rateLimit = rateLimits.Values.FirstOrDefault();
+
+            return rateLimit["/blocks/ids"];
         }
     }
 }

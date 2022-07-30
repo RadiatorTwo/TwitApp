@@ -6,6 +6,12 @@ using TwitApp.Data;
 using TwitApp.HostedServices;
 using TwitApp.Services;
 using System.Configuration;
+using System.Text;
+
+System.Console.OutputEncoding = Encoding.UTF8;
+System.Console.InputEncoding = Encoding.UTF8;
+
+
 
 CreateHostBuilder(args).Build().Run();
 
