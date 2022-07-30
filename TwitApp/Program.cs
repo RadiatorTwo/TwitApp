@@ -5,7 +5,6 @@ using Microsoft.Extensions.Hosting;
 using TwitApp.Data;
 using TwitApp.HostedServices;
 using TwitApp.Services;
-using Tweetinvi;
 using System.Configuration;
 
 CreateHostBuilder(args).Build().Run();
@@ -23,10 +22,13 @@ static IHostBuilder CreateHostBuilder(string[] args) =>
                 .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
                 .AddJsonFile("appsettings.json").Build();
 
-            var tweetinvi = new TwitterClient(config["ConsumerKey"], config["ConsumerSecret"], config["AccessToken"], config["AccessSecret"]);
-            tweetinvi.Config.RateLimitTrackerMode = RateLimitTrackerMode.TrackAndAwait;
-            
-            services.AddSingleton(tweetinvi);
+            var coreTweet = new CoreTweet.Tokens();
+            coreTweet.ConsumerKey = config["ConsumerKey"];
+            coreTweet.ConsumerSecret = config["ConsumerSecret"];
+            coreTweet.AccessToken = config["AccessToken"];
+            coreTweet.AccessTokenSecret = config["AccessSecret"];
+
+            services.AddSingleton(coreTweet);
         })
         .ConfigureAppConfiguration((hostingContext, config) =>
         {

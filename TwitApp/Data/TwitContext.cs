@@ -16,8 +16,17 @@ namespace TwitApp.Data
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            optionsBuilder.UseSqlite("Data Source=Twit.db");
+            var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "Twit.db");
+            
+            if (!Directory.Exists(Path.GetDirectoryName(dbPath)))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(dbPath));
+            }
+
+            optionsBuilder.UseSqlite("Filename = " + dbPath);
             optionsBuilder.EnableSensitiveDataLogging();
+
+            base.OnConfiguring(optionsBuilder);
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
