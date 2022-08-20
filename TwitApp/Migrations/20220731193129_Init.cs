@@ -21,6 +21,18 @@ namespace TwitApp.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Cursors",
+                columns: table => new
+                {
+                    Name = table.Column<string>(type: "TEXT", nullable: false),
+                    CursorID = table.Column<long>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Cursors", x => x.Name);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Follower",
                 columns: table => new
                 {
@@ -49,6 +61,9 @@ namespace TwitApp.Migrations
         {
             migrationBuilder.DropTable(
                 name: "BlockedUsers");
+
+            migrationBuilder.DropTable(
+                name: "Cursors");
 
             migrationBuilder.DropTable(
                 name: "Follower");

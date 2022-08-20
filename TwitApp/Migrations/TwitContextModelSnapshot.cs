@@ -27,6 +27,19 @@ namespace TwitApp.Migrations
                     b.ToTable("BlockedUsers", (string)null);
                 });
 
+            modelBuilder.Entity("TwitApp.Models.Cursor", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CursorID")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("Cursors");
+                });
+
             modelBuilder.Entity("TwitApp.Models.Follower", b =>
                 {
                     b.Property<long>("ID")

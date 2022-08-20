@@ -3,7 +3,7 @@ using Spectre.Console;
 using TwitApp.Data;
 using TwitApp.Models;
 using CoreTweet;
-using static TwitApp.Extensions.HelperExtensions;
+using CoreTweet.Rest;
 
 namespace TwitApp.Services
 {
@@ -24,7 +24,15 @@ namespace TwitApp.Services
         Task<int> GetDbFollowerCount();
         Task<int> GetDbFriendCount();
 
+        Task AddBlock(long id);
+        Task AddFollower(long id);
+        Task AddFriend(long id);
+
+        Task<Cursor> GetCursor(string cursorName);
+
         Task<RateLimit> GetBlocksRateLimit();
+        Task<RateLimit> GetFollowerRateLimit();
+        Task<RateLimit> GetFriendsRateLimit();
     }
 
     public class TwitService : ITwitService
@@ -52,161 +60,317 @@ namespace TwitApp.Services
             return Task.CompletedTask;
         }
 
-        private async Task CheckRateLimit(RateLimit rateLimit)
+        private async Task CheckRateLimit(RateLimit rateLimit, StatusContext statusContext)
         {
             if (rateLimit.Remaining == 0)
             {
                 AnsiConsole.MarkupLine("Rate Limit erreicht. Fortsetzung: {0}", rateLimit.Reset.LocalDateTime);
+                statusContext.Spinner = Spinner.Known.BouncingBar;
 
-                await AnsiConsole.Status()
-                    .Spinner(Spinner.Known.BouncingBar)
-                    .StartAsync("Verbleibend: ", async ctx =>
-                    {
-                        while (DateTime.Now < rateLimit.Reset)
-                        {
-                            var span = rateLimit.Reset.LocalDateTime - DateTime.Now;
-                            string formatted = string.Format("{0}{1}{2}{3}", span.Duration().Days > 0 ? string.Format("{0:0} Tag{1}, ", span.Days, span.Days == 1 ? string.Empty : "e") : string.Empty,
-                                                                             span.Duration().Hours > 0 ? string.Format("{0:0} Stunden, ", span.Hours) : string.Empty,
-                                                                             span.Duration().Minutes > 0 ? string.Format("{0:0} Minuten, ", span.Minutes) : string.Empty,
-                                                                             span.Duration().Seconds > 0 ? string.Format("{0:0} Sekunden", span.Seconds) : string.Empty);
+                while (DateTime.Now < rateLimit.Reset)
+                {
+                    var span = rateLimit.Reset.LocalDateTime - DateTime.Now;
+                    string formatted = string.Format("{0}{1}{2}{3}", span.Duration().Days > 0 ? string.Format("{0:0} Tag{1}, ", span.Days, span.Days == 1 ? string.Empty : "e") : string.Empty,
+                                                                     span.Duration().Hours > 0 ? string.Format("{0:0} Stunden, ", span.Hours) : string.Empty,
+                                                                     span.Duration().Minutes > 0 ? string.Format("{0:0} Minuten, ", span.Minutes) : string.Empty,
+                                                                     span.Duration().Seconds > 0 ? string.Format("{0:0} Sekunden", span.Seconds) : string.Empty);
 
-                            if (formatted.EndsWith(", ")) formatted = formatted.Substring(0, formatted.Length - 2);
+                    if (formatted.EndsWith(", ")) formatted = formatted.Substring(0, formatted.Length - 2);
 
-                            if (string.IsNullOrEmpty(formatted)) formatted = "0 seconds";
+                    if (string.IsNullOrEmpty(formatted)) formatted = "0 seconds";
 
-                            ctx.Status = String.Format("Verbleibend: {0}", formatted);
-                            await Task.Delay(1000);
-                        }
-                    });
+                    statusContext.Status = String.Format("Verbleibend: {0}", formatted);
+                    await Task.Delay(1000);
+                }
+
+                await Task.Delay(2000);
             }
         }
 
         public async Task LoadBlockedUsers()
         {
-            var rateLimit = await GetBlocksRateLimit();
+            await AnsiConsole.Status()
+                    .StartAsync("Lade geblockte User", async ctx =>
+                    {
+                        ctx.Status = "Checke Rate Limit";
+                        var rateLimit = await GetBlocksRateLimit();
 
-            await CheckRateLimit(rateLimit);
+                        await CheckRateLimit(rateLimit, ctx);
 
-            await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM BlockedUsers;");
+                        ctx.Spinner = Spinner.Known.Dots12;
 
-            Cursored<long> iterator = null;
+                        //await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM BlockedUsers;");
 
-            try
-            {
-                iterator = await _twitterClient.Blocks.IdsAsync();
-            }
-            catch
-            {
-            }
+                        Cursored<long> iterator = null;
+                        var cursor = await GetCursor("blocks");
 
-            long i = 0;
-            long count = 0;
+                        ctx.Status = "Lade Twitter IDs";
 
-            do
-            {
-                i++;
-                await CheckRateLimit(iterator.RateLimit);
+                        try
+                        {
+                            if (cursor != null)
+                            {
+                                iterator = await _twitterClient.Blocks.IdsAsync(cursor.CursorID);
+                            }
+                            else
+                            {
+                                iterator = await _twitterClient.Blocks.IdsAsync();
+                            }
+                        }
+                        catch
+                        {
+                        }
 
-                AnsiConsole.MarkupLine("Page " + i.ToString());
+                        var count = await GetDbBlockedCount();
 
-                foreach (var blockedId in iterator.Result)
-                {
-                    var newBlockedUser = new BlockedUser();
-                    newBlockedUser.ID = blockedId;
+                        do
+                        {
+                            ctx.Status = "Speichere Twitter IDs in Datenbank";
 
-                    _twitContext.BlockedUsers.Add(newBlockedUser);
-                    count++;
-                }
-                await _twitContext.SaveChangesAsync();
+                            foreach (var blockedId in iterator.Result)
+                            {
+                                count++;
+                                await AddBlock(blockedId);
+                            }
 
-                if (iterator.NextCursor != 0)
-                {
-                    iterator = await _twitterClient.Blocks.IdsAsync(iterator.NextCursor);
-                }
+                            await _twitContext.SaveChangesAsync();
 
-                AnsiConsole.MarkupLine("Count: {0}", count);
-                await Task.Delay(100);
-            } while (iterator.NextCursor != 0);
+                            AnsiConsole.MarkupLine("Gesamtanzahl Blocks: [green]{0}[/]", count);
+
+                            if (cursor != null)
+                            {
+                                cursor.CursorID = iterator.NextCursor;
+                                _twitContext.Cursors.Update(cursor);
+                            }
+                            else
+                            {
+                                cursor = new Cursor();
+                                cursor.CursorID = iterator.NextCursor;
+                                cursor.Name = "blocks";
+                                _twitContext.Cursors.Add(cursor);
+                            }
+
+                            await _twitContext.SaveChangesAsync();
+
+                            if (iterator.NextCursor != 0)
+                            {
+                                ctx.Status = "Lade Twitter IDs";
+
+                                if (iterator.RateLimit == null)
+                                {
+                                    rateLimit = await GetBlocksRateLimit();
+                                    await CheckRateLimit(rateLimit, ctx);
+                                }
+                                else
+                                {
+                                    await CheckRateLimit(iterator.RateLimit, ctx);
+                                }
+
+                                iterator = await _twitterClient.Blocks.IdsAsync(iterator.NextCursor);
+                            }
+                            else
+                            {
+                                cursor = await _twitContext.Cursors.Where(cursor => cursor.Name == "blocks").FirstOrDefaultAsync();
+                                if (cursor != null)
+                                {
+                                    _twitContext.Cursors.Remove(cursor); ;
+                                    await _twitContext.SaveChangesAsync();
+                                }
+                            }
+
+                            await Task.Delay(100);
+                        } while (iterator.NextCursor != 0);
+                    });
         }
 
         public async Task LoadFollower()
         {
-            await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM Follower;");
+            await AnsiConsole.Status()
+                    .StartAsync("Lade Follower", async ctx =>
+                    {
+                        ctx.Status = "Checke Rate Limit";
+                        var rateLimit = await GetFollowerRateLimit();
 
-            var iterator = await _twitterClient.Followers.IdsAsync();
+                        await CheckRateLimit(rateLimit, ctx);
 
-            long i = 0;
-            long count = 0;
+                        ctx.Spinner = Spinner.Known.Dots12;
 
-            do
-            {
-                i++;
-                Console.WriteLine("Page " + i.ToString());
+                        Cursored<long> iterator = null;
+                        var cursor = await GetCursor("followers");
 
-                if (iterator.RateLimit.Remaining == 0)
-                {
-                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", iterator.RateLimit.Reset);
-                }
+                        ctx.Status = "Lade Twitter IDs";
 
-                foreach (var followerId in iterator.Result)
-                {
-                    var newFollower = new Follower();
-                    newFollower.ID = followerId;
+                        try
+                        {
+                            if (cursor != null)
+                            {
+                                iterator = await _twitterClient.Followers.IdsAsync(cursor.CursorID);
+                            }
+                            else
+                            {
+                                iterator = await _twitterClient.Followers.IdsAsync();
+                            }
+                        }
+                        catch
+                        {
+                        }
 
-                    _twitContext.Follower.Add(newFollower);
-                    count++;
-                }
+                        var count = await GetDbFollowerCount();
 
-                await _twitContext.SaveChangesAsync();
+                        do
+                        {
+                            ctx.Status = "Speichere Twitter IDs in Datenbank";
 
-                if (iterator.NextCursor != 0)
-                {
-                    iterator = await _twitterClient.Followers.IdsAsync(iterator.NextCursor);
-                }
+                            foreach (var followerId in iterator.Result)
+                            {
+                                count++;
+                                await AddFollower(followerId);
+                            }
 
-                Console.WriteLine("Count: {0}", count);
+                            await _twitContext.SaveChangesAsync();
 
-                await Task.Delay(100);
-            } while (iterator.NextCursor != 0);
+                            AnsiConsole.MarkupLine("Gesamtanzahl Follower: [green]{0}[/]", count);
+
+                            if (cursor != null)
+                            {
+                                cursor.CursorID = iterator.NextCursor;
+                                _twitContext.Cursors.Update(cursor);
+                            }
+                            else
+                            {
+                                cursor = new Cursor();
+                                cursor.CursorID = iterator.NextCursor;
+                                cursor.Name = "followers";
+                                _twitContext.Cursors.Add(cursor);
+                            }
+
+                            await _twitContext.SaveChangesAsync();
+
+                            if (iterator.NextCursor != 0)
+                            {
+                                ctx.Status = "Lade Twitter IDs";
+
+                                if (iterator.RateLimit == null)
+                                {
+                                    rateLimit = await GetFollowerRateLimit();
+                                    await CheckRateLimit(rateLimit, ctx);
+                                }
+                                else
+                                {
+                                    await CheckRateLimit(iterator.RateLimit, ctx);
+                                }
+
+                                iterator = await _twitterClient.Followers.IdsAsync(iterator.NextCursor);
+                            }
+                            else
+                            {
+                                cursor = await _twitContext.Cursors.Where(cursor => cursor.Name == "followers").FirstOrDefaultAsync();
+                                if (cursor != null)
+                                {
+                                    _twitContext.Cursors.Remove(cursor); ;
+                                    await _twitContext.SaveChangesAsync();
+                                }
+                            }
+
+                            await Task.Delay(100);
+                        } while (iterator.NextCursor != 0);
+                    });
         }
 
         public async Task LoadFriends()
         {
-            await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM Friends;");
+            await AnsiConsole.Status()
+                    .StartAsync("Lade Freunde", async ctx =>
+                    {
+                        ctx.Status = "Checke Rate Limit";
+                        var rateLimit = await GetFriendsRateLimit();
 
-            var iterator = await _twitterClient.Friends.IdsAsync();
+                        await CheckRateLimit(rateLimit, ctx);
 
-            long i = 0;
-            long count = 0;
+                        ctx.Spinner = Spinner.Known.Dots12;
 
-            do
-            {
-                i++;
-                Console.WriteLine("Page " + i.ToString());
+                        //await _twitContext.Database.ExecuteSqlRawAsync("DELETE FROM BlockedUsers;");
 
-                if (iterator.RateLimit.Remaining == 0)
-                {
-                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", iterator.RateLimit.Reset);
-                }
+                        Cursored<long> iterator = null;
+                        var cursor = await GetCursor("friends");
 
-                foreach (var followerId in iterator.Result)
-                {
-                    var newFriend = new Friend();
-                    newFriend.ID = followerId;
+                        ctx.Status = "Lade Twitter IDs";
 
-                    _twitContext.Friends.Add(newFriend);
-                    count++;
-                }
+                        try
+                        {
+                            if (cursor != null)
+                            {
+                                iterator = await _twitterClient.Friends.IdsAsync(cursor.CursorID);
+                            }
+                            else
+                            {
+                                iterator = await _twitterClient.Friends.IdsAsync();
+                            }
+                        }
+                        catch
+                        {
+                        }
 
-                await _twitContext.SaveChangesAsync();
+                        var count = await GetDbFriendCount();
 
-                if (iterator.NextCursor != 0)
-                {
-                    iterator = await _twitterClient.Friends.IdsAsync(iterator.NextCursor);
-                }
+                        do
+                        {
+                            ctx.Status = "Speichere Twitter IDs in Datenbank";
 
-                Console.WriteLine("Count: {0}", count);
-            } while (iterator.NextCursor != 0);
+                            foreach (var friendId in iterator.Result)
+                            {
+                                count++;
+                                await AddFriend(friendId);
+                            }
+
+                            await _twitContext.SaveChangesAsync();
+
+                            AnsiConsole.MarkupLine("Gesamtanzahl Freunde: [green]{0}[/]", count);
+
+                            if (cursor != null)
+                            {
+                                cursor.CursorID = iterator.NextCursor;
+                                _twitContext.Cursors.Update(cursor);
+                            }
+                            else
+                            {
+                                cursor = new Cursor();
+                                cursor.CursorID = iterator.NextCursor;
+                                cursor.Name = "friends";
+                                _twitContext.Cursors.Add(cursor);
+                            }
+
+                            await _twitContext.SaveChangesAsync();
+
+                            if (iterator.NextCursor != 0)
+                            {
+                                ctx.Status = "Lade Twitter IDs";
+
+                                if (iterator.RateLimit == null)
+                                {
+                                    rateLimit = await GetFriendsRateLimit();
+                                    await CheckRateLimit(rateLimit, ctx);
+                                }
+                                else
+                                {
+                                    await CheckRateLimit(iterator.RateLimit, ctx);
+                                }
+
+                                iterator = await _twitterClient.Friends.IdsAsync(iterator.NextCursor);
+                            }
+                            else
+                            {
+                                cursor = await _twitContext.Cursors.Where(cursor => cursor.Name == "friends").FirstOrDefaultAsync();
+                                if (cursor != null)
+                                {
+                                    _twitContext.Cursors.Remove(cursor); ;
+                                    await _twitContext.SaveChangesAsync();
+                                }
+                            }
+
+                            await Task.Delay(100);
+                        } while (iterator.NextCursor != 0);
+                    });
         }
 
         public async Task BlockUserAndFollower()
@@ -221,70 +385,96 @@ namespace TwitApp.Services
 
         public async Task BlockUsername(string usernameToBlock)
         {
-            UserResponse userToBlock;
-
-            try
-            {
-                userToBlock = await _twitterClient.Users.ShowAsync(usernameToBlock);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-                return;
-            }
-
-            Console.WriteLine("Blocke: {0}, {1}", userToBlock.Name, userToBlock.ScreenName);
-
-            var iterator = await _twitterClient.Followers.IdsAsync(usernameToBlock);
-
-            do
-            {
-                if (iterator.RateLimit.Remaining == 0)
-                {
-                    Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", iterator.RateLimit.Reset);
-                }
-
-                foreach (var followerId in iterator.Result)
-                {
-                    if (await CheckBlockedId(followerId))
+            await AnsiConsole.Status()
+                    .StartAsync("Lade Zu Blockenden User", async ctx =>
                     {
-                        Console.WriteLine("Bereits geblockt: {0}", followerId);
-                        continue;
-                    }
+                        UserResponse userToBlock;
 
-                    if (await CheckFollowerId(followerId))
-                    {
-                        Console.WriteLine("Follower Skip: {0}", followerId.ToString());
-                        continue;
-                    }
+                        try
+                        {
+                            userToBlock = await _twitterClient.Users.ShowAsync(usernameToBlock);
+                        }
+                        catch (Exception ex)
+                        {
+                            AnsiConsole.MarkupLine(ex.Message);
+                            return;
+                        }
+                        ctx.Status = "Checke Rate Limit";
 
-                    if (await CheckFollowingId(followerId))
-                    {
-                        Console.WriteLine("Friend Skip: {0}", followerId.ToString());
-                        continue;
-                    }
+                        var rateLimit = await GetFollowerRateLimit();
 
-                    try
-                    {
-                        await _twitterClient.Blocks.CreateAsync(followerId);
-                        Console.WriteLine("Block durchgeführt: {0}", followerId.ToString());
-                    }
-                    catch (TwitterException ex)
-                    {
-                        Console.WriteLine(ex.Message);
-                    }
-                    await AddBlockedId(followerId);
-                    await Task.Delay(100);
-                }
-            } while (iterator.NextCursor != 0);
+                        await CheckRateLimit(rateLimit, ctx);
 
-            if (!await CheckBlockedId((long)userToBlock.Id))
-            {
-                await _twitterClient.Blocks.CreateAsync(userToBlock.Id);
-                await AddBlockedId((long)userToBlock.Id);
-            }
+                        ctx.Spinner = Spinner.Known.Dots12;
 
-            Console.WriteLine("Benutzer {0} und Follower geblockt.", userToBlock.Name);
+                        AnsiConsole.MarkupLine("Blocke: {0}, {1}", userToBlock.Name, userToBlock.ScreenName);
+
+                        ctx.Status = "Lade Follower IDs";
+                        var iterator = await _twitterClient.Followers.IdsAsync(usernameToBlock);
+
+                        do
+                        {
+                            ctx.Status = "Blocke Follower IDs";
+
+                            foreach (var followerId in iterator.Result)
+                            {
+                                if (await CheckBlockedId(followerId))
+                                {
+                                    AnsiConsole.MarkupLine("Bereits geblockt: {0}", followerId);
+                                    continue;
+                                }
+
+                                if (await CheckFollowerId(followerId))
+                                {
+                                    AnsiConsole.MarkupLine("Follower Skip: {0}", followerId.ToString());
+                                    continue;
+                                }
+
+                                if (await CheckFollowingId(followerId))
+                                {
+                                    AnsiConsole.MarkupLine("Friend Skip: {0}", followerId.ToString());
+                                    continue;
+                                }
+
+                                try
+                                {
+                                    await _twitterClient.Blocks.CreateAsync(followerId);
+                                    AnsiConsole.MarkupLine("Block durchgeführt: {0}", followerId.ToString());
+                                }
+                                catch (TwitterException ex)
+                                {
+                                    AnsiConsole.MarkupLine(ex.Message);
+                                }
+
+                                await AddBlockedId(followerId);
+                                await Task.Delay(100);
+                            }
+
+                            ctx.Status = "Lade Follower IDs";
+
+                            if (iterator.RateLimit == null)
+                            {
+                                rateLimit = await GetFollowerRateLimit();
+                                await CheckRateLimit(rateLimit, ctx);
+                            }
+                            else
+                            {
+                                await CheckRateLimit(iterator.RateLimit, ctx);
+                            }
+
+                            iterator = await _twitterClient.Followers.IdsAsync(usernameToBlock, iterator.NextCursor);
+
+                        } while (iterator.NextCursor != 0);
+
+                        if (!await CheckBlockedId((long)userToBlock.Id))
+                        {
+                            ctx.Status = "Blocke User";
+                            await _twitterClient.Blocks.CreateAsync((long)userToBlock.Id);
+                            await AddBlockedId((long)userToBlock.Id);
+                        }
+
+                        AnsiConsole.MarkupLine("Benutzer {0} und Follower geblockt.", userToBlock.Name);
+                    });
         }
 
         public async Task UnblockUserAndFollower(string usernameToUnblock)
@@ -515,6 +705,63 @@ namespace TwitApp.Services
             var rateLimit = rateLimits.Values.FirstOrDefault();
 
             return rateLimit["/blocks/ids"];
+        }
+
+        public async Task<RateLimit> GetFollowerRateLimit()
+        {
+            var rateLimits = await _twitterClient.Application.RateLimitStatusAsync(@"followers");
+            var rateLimit = rateLimits.Values.FirstOrDefault();
+
+            return rateLimit["/followers/ids"];
+        }
+
+        public async Task<RateLimit> GetFriendsRateLimit()
+        {
+            var rateLimits = await _twitterClient.Application.RateLimitStatusAsync(@"friends");
+            var rateLimit = rateLimits.Values.FirstOrDefault();
+
+            return rateLimit["/friends/ids"];
+        }
+
+        public async Task<Cursor> GetCursor(string cursorName)
+        {
+            return await _twitContext.Cursors.Where(cursor => cursor.Name == cursorName).FirstOrDefaultAsync();
+        }
+
+        public async Task AddBlock(long id)
+        {
+            var blockedUser = await _twitContext.BlockedUsers.Where(blockedUser => blockedUser.ID == id).FirstOrDefaultAsync();
+
+            if (blockedUser == null)
+            {
+                blockedUser = new BlockedUser();
+                blockedUser.ID = id;
+                await _twitContext.BlockedUsers.AddAsync(blockedUser);
+            }
+        }
+
+        public async Task AddFollower(long id)
+        {
+            var blockedUser = await _twitContext.BlockedUsers.Where(blockedUser => blockedUser.ID == id).FirstOrDefaultAsync();
+
+            if (blockedUser == null)
+            {
+                blockedUser = new BlockedUser();
+                blockedUser.ID = id;
+                await _twitContext.BlockedUsers.AddAsync(blockedUser);
+            }
+        }
+
+        public async Task AddFriend(long id)
+        {
+            var blockedUser = await _twitContext.BlockedUsers.Where(blockedUser => blockedUser.ID == id).FirstOrDefaultAsync();
+
+            if (blockedUser == null)
+            {
+                blockedUser = new BlockedUser();
+                blockedUser.ID = id;
+                await _twitContext.BlockedUsers.AddAsync(blockedUser);
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ namespace TwitApp.Data
         public DbSet<BlockedUser> BlockedUsers { get; set; }
         public DbSet<Follower> Follower { get; set; }
         public DbSet<Friend> Friends { get; set; }
+        public DbSet<Cursor> Cursors { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {

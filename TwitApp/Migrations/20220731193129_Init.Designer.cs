@@ -10,7 +10,7 @@ using TwitApp.Data;
 namespace TwitApp.Migrations
 {
     [DbContext(typeof(TwitContext))]
-    [Migration("20220717210038_Init")]
+    [Migration("20220731193129_Init")]
     partial class Init
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -27,6 +27,19 @@ namespace TwitApp.Migrations
                     b.HasKey("ID");
 
                     b.ToTable("BlockedUsers", (string)null);
+                });
+
+            modelBuilder.Entity("TwitApp.Models.Cursor", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CursorID")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("Cursors");
                 });
 
             modelBuilder.Entity("TwitApp.Models.Follower", b =>
