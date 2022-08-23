@@ -41,7 +41,7 @@ namespace TwitApp.Services
         private static string blockedUsersFilePath = Path.Combine(@"C:\Progs\Twitblock", "blocked.txt");
         private static string inputBlockFilePath = Path.Combine(@"C:\Progs\Twitblock", "inputblock.txt");
 #else
-        private static string blockedUsersFilePath = Path.Combine(Environment.CurrentDirectory, "blocked.txt");
+        //private static string blockedUsersFilePath = Path.Combine(Environment.CurrentDirectory, "blocked.txt");
         private static string inputBlockFilePath = Path.Combine(Environment.CurrentDirectory, "inputblock.txt");
 #endif
 
@@ -414,7 +414,7 @@ namespace TwitApp.Services
 
                         do
                         {
-                            ctx.Status = "Blocke Follower IDs";
+                            ctx.Status = $"Blocke Follower von {userToBlock.ScreenName} | {userToBlock.Name}";
 
                             foreach (var followerId in iterator.Result)
                             {
@@ -450,8 +450,6 @@ namespace TwitApp.Services
                                 await Task.Delay(100);
                             }
 
-                            ctx.Status = "Lade Follower IDs";
-
                             if (iterator.RateLimit == null)
                             {
                                 rateLimit = await GetFollowerRateLimit();
@@ -468,7 +466,7 @@ namespace TwitApp.Services
 
                         if (!await CheckBlockedId((long)userToBlock.Id))
                         {
-                            ctx.Status = "Blocke User";
+                            ctx.Status = $"Blocke User {userToBlock.ScreenName} | {userToBlock.Name}";
                             await _twitterClient.Blocks.CreateAsync((long)userToBlock.Id);
                             await AddBlockedId((long)userToBlock.Id);
                         }
