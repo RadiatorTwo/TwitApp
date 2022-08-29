@@ -17,6 +17,7 @@ namespace TwitApp.MenuItems
             BlockUserInput,
             UnblockUser,
             BlockRecursive,
+            FollowStatusRetweets,
             LoadUsername,
             ShowDatabaseCounts
         }
@@ -52,6 +53,9 @@ namespace TwitApp.MenuItems
 
                 case MenuType.BlockRecursive:
                     return "Block Rekursiv";
+
+                case MenuType.FollowStatusRetweets:
+                    return "Folge Retweet Benutzern eines Status";
 
                 case MenuType.LoadUsername:
                     return "Lade Benutzernamen anhand von ID";

@@ -42,6 +42,7 @@ namespace TwitApp.HostedServices
             var menuBlockUserInput = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.BlockUserInput);
             var menuUnblockUser = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.UnblockUser);
             var menuBlockRecursive = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.BlockRecursive);
+            var menuFollowStatusRetweets = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.FollowStatusRetweets);
             var menuLoadUsername = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.LoadUsername);
             var menuShowDbCount = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.ShowDatabaseCounts);
 
@@ -56,6 +57,7 @@ namespace TwitApp.HostedServices
                                                                                                 menuBlockUserInput,
                                                                                                 menuUnblockUser,
                                                                                                 menuBlockRecursive,
+                                                                                                menuFollowStatusRetweets,
                                                                                                 menuLoadUsername,
                                                                                                 menuShowDbCount
                                                                                             }));
@@ -94,15 +96,17 @@ namespace TwitApp.HostedServices
                     await _twitService.BlockRecursive(usernameToBlockRecursive, depth);
                     break;
 
+                case MenuItems.MainMenu.MenuType.FollowStatusRetweets:
+                    var statusIdString = AnsiConsole.Ask<string>("[green]Status ID[/] eingeben:");
+                    var statusId = Convert.ToInt64(statusIdString);
+                    await _twitService.FollowRetweets(statusId);
+                    break;
+
                 case MenuItems.MainMenu.MenuType.LoadUsername:
                     var idString = AnsiConsole.Ask<string>("[green]ID[/] eingeben:");
-                    
                     long id = Convert.ToInt64(idString);
-
                     var username = await _twitService.GetUsername(id);
-
                     AnsiConsole.MarkupLine($"[red]{username}[/]");
-
                     break;
 
                 case MenuItems.MainMenu.MenuType.ShowDatabaseCounts:

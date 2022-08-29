@@ -4,6 +4,8 @@ using TwitApp.Data;
 using TwitApp.Models;
 using CoreTweet;
 using CoreTweet.Rest;
+using CoreTweet.Core;
+using Status = CoreTweet.Status;
 
 namespace TwitApp.Services
 {
@@ -17,6 +19,8 @@ namespace TwitApp.Services
         Task BlockUsername(string usernameToBlock);
         Task UnblockUserAndFollower(string usernameToUnblock);
         Task BlockRecursive(string username, int maxDepth);
+
+        Task FollowRetweets(long tweetid);
 
         Task<string> GetUsername(long id);
 
@@ -573,6 +577,51 @@ namespace TwitApp.Services
                     Console.WriteLine("Rate Limit erreicht. Fortsetzung: {0}", response.RateLimit.Reset);
                 }
             }
+        }
+
+        public async Task FollowRetweets(long tweetid)
+        {
+            await AnsiConsole.Status()
+                    .StartAsync("Lade Retweets", async ctx =>
+                    {
+                        ListedResponse<Status> retweets = null;
+
+                        try
+                        {
+                            retweets = await _twitterClient.Statuses.RetweetsAsync(tweetid);
+                        }
+                        catch
+                        {
+                        }
+
+                        if (retweets == null)
+                        {
+                            return;
+                        }
+
+                        AnsiConsole.MarkupLine("{0} Retweets gefunden", retweets.Count);
+
+                        foreach (var status in retweets)
+                        {
+                            if (await CheckFollowingId((long)status.User.Id) || status.User.Id == 126127533)
+                            {
+                                AnsiConsole.MarkupLine("Folge bereits {0}", status.User.Id);
+                                continue;
+                            }
+
+                            AnsiConsole.MarkupLine("Folge User  mit Id {0}: {1}", status.User.Id, status.User.Name);
+
+                            try
+                            {
+                                var response = await _twitterClient.Friendships.CreateAsync(status.User.ScreenName);
+                                await CheckRateLimit(response.RateLimit, ctx);
+                                await AddFollowingId((long)status.User.Id);
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    });
         }
 
         private async Task<List<long>> GetFollowerIdsRecursive(long id, int currentDepth, int maxDepth)
