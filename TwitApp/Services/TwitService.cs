@@ -30,8 +30,8 @@ namespace TwitApp.Services
         Task<int> GetDbFriendCount();
 
         Task AddBlock(long id);
-        Task AddFollower(long id);
-        Task AddFriend(long id);
+        Task<bool> AddFollower(long id);
+        Task<bool> AddFriend(long id);
 
         Task<Cursor> GetCursor(string cursorName);
 
@@ -228,8 +228,11 @@ namespace TwitApp.Services
 
                             foreach (var followerId in iterator.Result)
                             {
-                                count++;
-                                await AddFollower(followerId);
+                                var result = await AddFollower(followerId);
+                                if (result)
+                                {
+                                    count++;
+                                }
                             }
 
                             await _twitContext.SaveChangesAsync();
@@ -324,8 +327,11 @@ namespace TwitApp.Services
 
                             foreach (var friendId in iterator.Result)
                             {
-                                count++;
-                                await AddFriend(friendId);
+                                var result = await AddFriend(friendId);
+                                if (result)
+                                {
+                                    count++;
+                                }
                             }
 
                             await _twitContext.SaveChangesAsync();
@@ -834,27 +840,37 @@ namespace TwitApp.Services
             }
         }
 
-        public async Task AddFollower(long id)
+        public async Task<bool> AddFollower(long id)
         {
-            var blockedUser = await _twitContext.BlockedUsers.Where(blockedUser => blockedUser.ID == id).FirstOrDefaultAsync();
+            var follower = await _twitContext.Follower.Where(follower => follower.ID == id).FirstOrDefaultAsync();
 
-            if (blockedUser == null)
+            if (follower == null)
             {
-                blockedUser = new BlockedUser();
-                blockedUser.ID = id;
-                await _twitContext.BlockedUsers.AddAsync(blockedUser);
+                follower = new Follower();
+                follower.ID = id;
+                await _twitContext.Follower.AddAsync(follower);
+                return true;
+            }
+            else
+            {
+                return false;
             }
         }
 
-        public async Task AddFriend(long id)
+        public async Task<bool> AddFriend(long id)
         {
-            var blockedUser = await _twitContext.BlockedUsers.Where(blockedUser => blockedUser.ID == id).FirstOrDefaultAsync();
+            var friend = await _twitContext.Friends.Where(friend => friend.ID == id).FirstOrDefaultAsync();
 
-            if (blockedUser == null)
+            if (friend == null)
             {
-                blockedUser = new BlockedUser();
-                blockedUser.ID = id;
-                await _twitContext.BlockedUsers.AddAsync(blockedUser);
+                friend = new Friend();
+                friend.ID = id;
+                await _twitContext.Friends.AddAsync(friend);
+                return true;
+            }
+            else
+            {
+                return false;
             }
         }
     }
