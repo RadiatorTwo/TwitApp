@@ -18,6 +18,7 @@ namespace TwitApp.MenuItems
             UnblockUser,
             BlockRecursive,
             FollowStatusRetweets,
+            FollowFollower,
             LoadUsername,
             ShowDatabaseCounts
         }
@@ -62,6 +63,9 @@ namespace TwitApp.MenuItems
 
                 case MenuType.ShowDatabaseCounts:
                     return "Zeige Anzahl Datenbank Einträge";
+
+                case MenuType.FollowFollower:
+                    return "Folge Followern";
 
                 default:
                     return "WTF?";

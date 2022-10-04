@@ -43,11 +43,12 @@ namespace TwitApp.HostedServices
             var menuUnblockUser = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.UnblockUser);
             var menuBlockRecursive = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.BlockRecursive);
             var menuFollowStatusRetweets = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.FollowStatusRetweets);
+            var menuFollowFollower = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.FollowFollower);
             var menuLoadUsername = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.LoadUsername);
             var menuShowDbCount = new MenuItems.MainMenu(MenuItems.MainMenu.MenuType.ShowDatabaseCounts);
 
             var menuSelection = AnsiConsole.Prompt(new SelectionPrompt<MenuItems.MainMenu>().Title("[yellow]Hauptmenu[/]")
-                                                                                            .PageSize(10)
+                                                                                            .PageSize(15)
                                                                                             .AddChoices(new[]
                                                                                             {
                                                                                                 menuLoadBlocked,
@@ -58,6 +59,7 @@ namespace TwitApp.HostedServices
                                                                                                 menuUnblockUser,
                                                                                                 menuBlockRecursive,
                                                                                                 menuFollowStatusRetweets,
+                                                                                                menuFollowFollower,
                                                                                                 menuLoadUsername,
                                                                                                 menuShowDbCount
                                                                                             }));
@@ -100,6 +102,10 @@ namespace TwitApp.HostedServices
                     var statusIdString = AnsiConsole.Ask<string>("[green]Status ID[/] eingeben:");
                     var statusId = Convert.ToInt64(statusIdString);
                     await _twitService.FollowRetweets(statusId);
+                    break;
+
+                case MenuItems.MainMenu.MenuType.FollowFollower:
+                    await _twitService.FollowFollower();
                     break;
 
                 case MenuItems.MainMenu.MenuType.LoadUsername:

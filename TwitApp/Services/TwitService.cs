@@ -21,6 +21,7 @@ namespace TwitApp.Services
         Task BlockRecursive(string username, int maxDepth);
 
         Task FollowRetweets(long tweetid);
+        Task FollowFollower();
 
         Task<string> GetUsername(long id);
 
@@ -271,7 +272,7 @@ namespace TwitApp.Services
                                 cursor = await _twitContext.Cursors.Where(cursor => cursor.Name == "followers").FirstOrDefaultAsync();
                                 if (cursor != null)
                                 {
-                                    _twitContext.Cursors.Remove(cursor); ;
+                                    _twitContext.Cursors.Remove(cursor);
                                     await _twitContext.SaveChangesAsync();
                                 }
                             }
@@ -622,6 +623,52 @@ namespace TwitApp.Services
                             }
                         }
                     });
+        }
+
+        public async Task FollowFollower()
+        {
+            await AnsiConsole.Status()
+                .StartAsync("Lade aktuelle Freunde", async ctx =>
+                {
+                    var friendIds = new List<long>();
+
+                    var cursorFriends = await _twitterClient.Friends.IdsAsync();
+
+                    do
+                    {
+                        foreach (var friendId in cursorFriends.Result)
+                        {
+                            friendIds.Add(friendId);
+                        }
+
+                        if (cursorFriends.NextCursor != 0)
+                        {
+                            cursorFriends = await _twitterClient.Friends.IdsAsync(cursorFriends.NextCursor);
+                        }
+                    } while (cursorFriends.NextCursor != 0);
+
+                    ctx.Status = "Lade Follower";
+                    var cursorFollower = await _twitterClient.Followers.IdsAsync();
+
+                    do
+                    {
+                        foreach (var followerId in cursorFollower)
+                        {
+                            if (friendIds.Contains(followerId))
+                            {
+                                continue;
+                            }
+
+                            AnsiConsole.MarkupLine("Folge Id {0} zurück", followerId);
+                            await _twitterClient.Friendships.CreateAsync(followerId, follow: true);
+                        }
+
+                        if (cursorFollower.NextCursor != 0)
+                        {
+                            cursorFollower = await _twitterClient.Followers.IdsAsync(cursorFollower.NextCursor);
+                        }
+                    } while (cursorFollower.NextCursor != 0);
+                });
         }
 
         private async Task<List<long>> GetFollowerIdsRecursive(long id, int currentDepth, int maxDepth)
